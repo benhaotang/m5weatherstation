@@ -1,16 +1,21 @@
 #include <M5EPD.h>
 #include <Multichannel_Gas_GMXXX.h>
+#include <SGP30.h>
 static uint8_t recv_cmd[8] = {};//multi-channel gas sensor data buffer
-char temStr[10],humStr[10];
+char temStr[10],humStr[10],warn[20];
 char xStr[10],yStr[10];
 float tem,hum;
-int ts=0;
-float tem1,tem2,hum1,hum2;
+int ts=0,tsco=0;
+float tem1,tem2,hum1,hum2,co2old,tvocold;
 int point[2];
+uint32_t lastTime = 0;
+bool HE=false;// turn on or off H2 and Ethanol detection
 #define CARDKB_ADDR 0x5F
 #define MULTIG_ADDR 0x08//maybe 3c
+#define SGP30G_ADDR 0x58//maybe 3c
 #include <Wire.h>
 GAS_GMXXX<TwoWire> multigas;
+SGP30 SGP(&Wire1);
 
 M5EPD_Canvas canvas(&M5.EPD);
 
@@ -28,7 +33,10 @@ void setup(){
     canvas.createCanvas(540, 960);
     canvas.setTextSize(3);
     multigas.begin(Wire1, MULTIG_ADDR);
-    ts=0;
+    ts=0;tsco=0;
+    SGP.begin(25,32);
+    SGP.GenericReset();
+    if(HE) SGP.request();
 }
 
 // GM102B (NO2)
@@ -198,6 +206,7 @@ float getCOppm(uint32_t raw, float temp, float humidity) {
 
 
 void loop(){
+    strcpy(warn,"Warning:");
     canvas.drawRoundRect(50, 0, 450, 200, 20, 15);
     canvas.drawRoundRect(50, 200, 450, 200, 20, 15);
     canvas.drawString("30" , 10, 0);   
@@ -205,13 +214,17 @@ void loop(){
     canvas.drawString("80" , 10, 210);
     canvas.drawString("30" , 10, 380);
     M5.SHT30.UpdateData();
-    Serial.printf("%i\n",ts);
+    //Serial.printf("%i\n",ts);
     tem = M5.SHT30.GetTemperature();
     hum = M5.SHT30.GetRelHumidity();
-    Serial.printf("Temperatura: %2.2f*C  Humedad: %0.2f%%\r\n", tem, hum);
+    //Serial.printf("Temperatura: %2.2f*C  Humedad: %0.2f%%\r\n", tem, hum);
     dtostrf(tem, 2, 2 , temStr);
     dtostrf(hum, 2, 2 , humStr);
-    canvas.drawString("Humd:" + String(humStr)+"%" , 100, 460);
+    if(tem>35) strcat(warn,"High Tem! ");
+    if(tem<10) strcat(warn,"Low Tem! ");
+    if(hum>75) strcat(warn,"High Hum! ");
+    if(hum<30) strcat(warn,"Low Hum! ");
+    canvas.drawString("Humd:   " + String(humStr)+"%" , 100, 460);
     if(ts>=450){
       ts=0;
       canvas.fillRoundRect(50, 0, 450, 200, 20, 0);
@@ -230,7 +243,6 @@ void loop(){
       ts++;
       canvas.drawLine(ts+49, 200-(tem1-10)/20.0*200, ts+50, 200-(tem2-10)/20.0*200, 2, 15);
       canvas.drawLine(ts+49, 400-(hum1-30)/50.0*200, ts+50, 400-(hum2-30)/50.0*200, 2, 15);
-      Serial.printf("%i,%f-%i,%f\n",ts+49, 200-(tem1-10)/20.0*200, ts+50, 200-(tem2-10)/20.0*200);
       tem1=tem2;
       hum1=hum2;
     }   
@@ -239,8 +251,7 @@ void loop(){
       point[0] = M5.TP.readFingerX(0);
       point[1] = M5.TP.readFingerY(0);
     }
-    Serial.printf("Touch-%i,%i\n", point[0], point[1]);
-    canvas.pushCanvas(0,100,UPDATE_MODE_A2);
+    //Serial.printf("Touch-%i,%i\n", point[0], point[1]);
     char data='C';
     char c = 0;
     Wire1.requestFrom(
@@ -253,38 +264,82 @@ void loop(){
             Serial.println(c);
             data=c;
         }
-    canvas.drawString("Temp:" + String(temStr) + "*"+String(data), 100, 420);
+    canvas.drawString("Temp:   " + String(temStr) + "*"+String(data), 100, 420);
     
     uint8_t len = 0;
     uint8_t addr = 0;
     uint8_t i;
     uint32_t val = 0;
 
-    val = multigas.getGM102B(); Serial.print("GM102B: "); Serial.print(val); Serial.print("  =  ");
-    Serial.print(multigas.calcVol(val)); Serial.println("V");
-    Serial.print("NO2: "); Serial.print(getNO2ppm(val,tem,hum));Serial.println(" ppm");
-    if(val!=0) canvas.drawString("NO2:" + String(getNO2ppm(val,tem,hum)) + "ppm    ", 100, 500);
-    else canvas.drawString("NO2:Connect Err", 100, 500);
-    Serial.println("----");
-    val = multigas.getGM302B(); Serial.print("GM302B: "); Serial.print(val); Serial.print("  =  ");
-    Serial.print(multigas.calcVol(val)); Serial.println("V");
-    Serial.print("C2H5OH: "); Serial.print(getC2H5OHppm(val,tem,hum));Serial.println(" ppm");
-    if(val!=0) canvas.drawString("C2H5OH:" + String(getC2H5OHppm(val,tem,hum)) + "ppm      ", 100, 540);
-    else canvas.drawString("CH2H5OH:Connect Err", 100, 540);
-    Serial.println("----");
-    val = multigas.getGM502B(); Serial.print("GM502B: "); Serial.print(val); Serial.print("  =  ");
-    Serial.print(multigas.calcVol(val)); Serial.println("V");
-    Serial.print("VOC: "); Serial.print(getVOCppm(val,tem,hum)*1000);Serial.println(" ppb");
-    if(val!=0) canvas.drawString("VOC:" + String(getVOCppm(val,tem,hum)*1000) + "ppb    ", 100, 580);
-    else canvas.drawString("VOC:Connect Err", 100, 580);
-    Serial.println("----");
-    val = 0.1*multigas.getGM702B(); Serial.print("GM702B: "); Serial.print(val); Serial.print("  =  ");// this 0.1 is based on compaing with other commerial sensors at hand, yours may be different
-    Serial.print(multigas.calcVol(val)); Serial.println("V");
-    Serial.print("CO: "); Serial.print(getCOppm(val,tem,hum));Serial.println(" ppm");
-    if(val!=0) canvas.drawString("CO:" + String(getCOppm(val,tem,hum)) + "ppm    ", 100, 620);
-    else canvas.drawString("CO:Connect Err", 100, 620);
-    Serial.println("----");
-    canvas.drawString("CO2eq:Connect Err", 100, 660);
-    canvas.drawString("tVOC:Connect Err", 100, 700);
+    val = multigas.getGM102B(); //Serial.print("GM102B: "); Serial.print(val); Serial.print("  =  ");
+    //Serial.print(multigas.calcVol(val)); Serial.println("V");
+    //Serial.print("NO2: "); Serial.print(getNO2ppm(val,tem,hum));Serial.println(" ppm");
+    if(val!=0) canvas.drawString("NO2:    " + String(getNO2ppm(val,tem,hum)) + "ppm     ", 100, 500);
+    else canvas.drawString("NO2:    Connect Err", 100, 500);
+    //Serial.println("----");
+    val = multigas.getGM302B(); //Serial.print("GM302B: "); Serial.print(val); Serial.print("  =  ");
+    //Serial.print(multigas.calcVol(val)); Serial.println("V");
+    //Serial.print("C2H5OH: "); Serial.print(getC2H5OHppm(val,tem,hum));Serial.println(" ppm");
+    if(val!=0) canvas.drawString("C2H5OH: " + String(getC2H5OHppm(val,tem,hum)) + "ppm       ", 100, 540);
+    else canvas.drawString("CH2H5OH: Connect Err", 100, 540);
+    //Serial.println("----");
+    val = multigas.getGM502B(); //Serial.print("GM502B: "); Serial.print(val); Serial.print("  =  ");
+    //Serial.print(multigas.calcVol(val)); Serial.println("V");
+    //Serial.print("VOC: "); Serial.print(getVOCppm(val,tem,hum)*1000);Serial.println(" ppb");
+    if(val!=0) canvas.drawString("VOC:    " + String(getVOCppm(val,tem,hum)*1000) + "ppb       ", 100, 580);
+    else canvas.drawString("VOC:    Connect Err", 100, 580);
+    //Serial.println("----");
+    val = multigas.getGM702B(); //Serial.print("GM702B: "); Serial.print(val); Serial.print("  =  ");
+    //Serial.print(multigas.calcVol(val)); Serial.println("V");
+    //Serial.print("CO: "); Serial.print(getCOppm(val,tem,hum));Serial.println(" ppm");
+    if(val!=0) canvas.drawString("CO:     " + String(getCOppm(val,tem,hum)) + "ppm    ", 100, 620);
+    else canvas.drawString("CO:     Connect Err", 100, 620);
+    if(getCOppm(val,tem,hum)>9) strcat(warn,"CO! ");
+    //Serial.println("----");
+    if(ts==1&&HE==false){
+      canvas.drawString("H2:     Disabled", 100, 740);
+      canvas.drawString("Ethanol:Disabled", 100, 780);
+    }
+    if(millis() - lastTime > 1000){
+        tsco++;
+        SGP.setRelHumidity(tem, hum);
+        bool measure=SGP.isConnected();
+        if((tsco%2==1 && tsco<1000) || (!HE && tsco<1000)) {
+          SGP.read();//for co2 and tvoc
+          if(measure && SGP.getTVOC()<60000){
+            tvocold=SGP.getTVOC();
+            canvas.drawString("tVOC:   " + String(tvocold) + "ppb    ", 100, 700);
+          }
+          else if(measure && SGP.getTVOC()>=60000) canvas.drawString("tVOC:   Unstable         ", 100, 700);
+          else canvas.drawString("tVOC:   Connect Err", 100, 700);
+          if(measure && SGP.getCO2()<57330){
+            co2old=SGP.getCO2();
+            canvas.drawString("CO2:    " + String(co2old) + "ppm    ", 100, 660);
+          }
+          else if(measure && SGP.getCO2()>=57330) canvas.drawString("CO2:    Unstable       ", 100, 660);
+          else canvas.drawString("CO2:    Connect Err", 100, 660);
+          SGP.request();
+        }
+        else if(tsco%2==0 && tsco<1000 && HE){
+          SGP.readRaw();
+          if(measure && SGP.getH2()<=100000) canvas.drawString("H2:     " + String(SGP.getH2()) + "ppm    ", 100, 740);
+          else if(measure && SGP.getH2()>100000) canvas.drawString("H2:     Unstable                ", 100, 740);
+          else canvas.drawString("H2:     Connect Err ", 100, 740);
+          if(measure && SGP.getEthanol()<=100000) canvas.drawString("Ethanol:" + String(SGP.getEthanol()) + "ppm    ", 100, 780);
+          else if(measure && SGP.getEthanol()>100000) canvas.drawString("Ethanol:Unstable                ", 100, 780);
+          else canvas.drawString("Ethanol:Connect Err ", 100, 780);
+          SGP.requestRaw();
+        }
+        else if(tsco>=1000) tsco=0;
+
+        lastTime = millis();
+    }
+    if(co2old>1000&&co2old<2000) strcat(warn,"CO2! ");
+    if(co2old>2000) strcat(warn,"CO2!! ");
+    if(tvocold>250) strcat(warn,"tVOC! ");
+    if(strlen(warn)<=8) strcpy(warn,"Good Air Condition!");
+    canvas.fillRect(100, 820, 500, 40, 0);
+    canvas.drawString(warn, 100, 820);
+    canvas.pushCanvas(0,50,UPDATE_MODE_A2);
     delay(100);
 }
