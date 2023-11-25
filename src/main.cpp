@@ -12,7 +12,7 @@ uint32_t lastTime = 0;
 bool HE=false;// turn on or off H2 and Ethanol detection
 #define CARDKB_ADDR 0x5F
 #define MULTIG_ADDR 0x08//maybe 3c
-#define SGP30G_ADDR 0x58//maybe 3c
+#define SGP30G_ADDR 0x58
 #include <Wire.h>
 GAS_GMXXX<TwoWire> multigas;
 SGP30 SGP(&Wire1);
@@ -82,7 +82,7 @@ const float gm502b_rh_offset[4][13] PROGMEM = {
   { 1.25, 1.20, 1.18, 1.10, 1.05, 0.95, 0.92, 0.88, 0.86, 0.81, 0.73, 0.68, 0.62 }  // Rs/R0 @ 85%RH
 };
 
-const float gm502b_u2gas[2][9] PROGMEM = {
+const float gm502b_u2gas[2][9] PROGMEM = {//for me ,here 0.95v is 110ppb at 17C45%RH
   { 2.52, 2.90, 3.20, 3.40, 3.60, 3.90, 4.05, 4.15, 4.20 }, // Alcohol [V]
   { 0.0, 1.0, 3.5, 5.0, 10.0, 30.0, 50.0, 80.0, 100.0 }  // VOC [ppm]
 };
@@ -98,8 +98,9 @@ const float gm702b_rh_offset[4][7] PROGMEM = {
   { 1.28, 1.15, 1.08, 0.90, 0.87, 0.71, 0.68 }  // Rs/R0 @ 85%RH
 };
 
-const float gm702b_u2gas[2][9] PROGMEM = {
-  { 0.25, 0.65, 0.98, 1.35, 1.8, 1.98, 2.1, 2.38, 2.42 }, // V
+const float offset = 1.28;
+const float gm702b_u2gas[2][9] PROGMEM = {// for me ,here 2.22v is 2-3ppm at 17C45%RH
+  { 0.25+offset, 0.65+offset, 0.98+offset, 1.35+offset, 1.8+offset, 1.98+offset, 2.1+offset, 2.38+offset, 2.42+offset }, // V
   { 0.0, 5.0, 10.0, 20.0, 50.0, 100.0, 160.0, 500.0, 1000.0 }  // CO [ppm]
 };
 
@@ -280,8 +281,8 @@ void loop(){
     val = multigas.getGM302B(); //Serial.print("GM302B: "); Serial.print(val); Serial.print("  =  ");
     //Serial.print(multigas.calcVol(val)); Serial.println("V");
     //Serial.print("C2H5OH: "); Serial.print(getC2H5OHppm(val,tem,hum));Serial.println(" ppm");
-    if(val!=0) canvas.drawString("C2H5OH: " + String(getC2H5OHppm(val,tem,hum)) + "ppm       ", 100, 540);
-    else canvas.drawString("CH2H5OH: Connect Err", 100, 540);
+    if(val!=0) canvas.drawString("CH2H5OH:" + String(getC2H5OHppm(val,tem,hum)) + "ppm       ", 100, 540);
+    else canvas.drawString("CH2H5OH:Connect Err", 100, 540);
     //Serial.println("----");
     val = multigas.getGM502B(); //Serial.print("GM502B: "); Serial.print(val); Serial.print("  =  ");
     //Serial.print(multigas.calcVol(val)); Serial.println("V");
@@ -294,7 +295,7 @@ void loop(){
     //Serial.print("CO: "); Serial.print(getCOppm(val,tem,hum));Serial.println(" ppm");
     if(val!=0) canvas.drawString("CO:     " + String(getCOppm(val,tem,hum)) + "ppm    ", 100, 620);
     else canvas.drawString("CO:     Connect Err", 100, 620);
-    if(getCOppm(val,tem,hum)>9) strcat(warn,"CO! ");
+    //if(getCOppm(val,tem,hum)>9) strcat(warn,"CO! ");
     //Serial.println("----");
     if(ts==1&&HE==false){
       canvas.drawString("H2:     Disabled", 100, 740);
